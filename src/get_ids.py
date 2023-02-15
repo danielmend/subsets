@@ -3,7 +3,7 @@ import io
 import tarfile
 import os
 import tempfile
-from filters import similarity_filter_CLIP_embeddings
+from filters import similarity_filter
 import argparse
 from braceexpand import braceexpand
 import json
@@ -21,13 +21,32 @@ def extract_shard(shard, tempdir):
     tar_bytes = io.BytesIO(fs.open(f"{output_path}/{shard_id}").read())
     with tarfile.open(fileobj=tar_bytes) as tar:
         tar.extractall(tempdir)
-    return output_path, shard_id
+    return shard_id
 
 def filter_shard(shard, filter_fn):
     with tempfile.TemporaryDirectory() as tempdir:
-         output_path, shard_id = extract_shard(shard, tempdir)
-         keys_to_save = filter_fn(tempdir)
+         shard_id = extract_shard(shard, tempdir)
+         samples = group_shard_by_samples(tempdir)
+         keys_to_save = [sample['key'] for sample in samples if filter_fn(sample)]
          return shard_id, keys_to_save
+
+def group_shard_by_samples(tempdir):
+    extensions = set()
+    keys = set()
+    for file in os.listdir(tempdir):
+        key, ext = os.path.splitext(file)
+        extensions.add(ext)
+        keys.add(key)
+
+    samples = []
+    for key in keys:
+        s = {}
+        s['key'] = key
+        for ext in extensions:
+            s[ext] = f'{tempdir}/{key}{ext}'
+        samples.append(s)
+
+    return samples
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -50,11 +69,11 @@ def main():
     device = f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu"
     clip_model, _, preprocess = open_clip.create_model_and_transforms("ViT-H-14", pretrained="laion2b_s32b_b79k", device=device)
 
-    filter_fn = lambda tempdir: similarity_filter_CLIP_embeddings(tempdir, clip_model, device=device)
-
+    filter_fn = lambda sample: similarity_filter(sample, clip_model, device=device)
 
     for shard in shards:
         shard_id, keys_to_save = filter_shard(shard, filter_fn)
+        shard_id = shard_id.split('.tar')[0]
         with open(f'{args.dest}/{shard_id}_keep.json', 'w') as f:
              json.dump(keys_to_save, f)
 
