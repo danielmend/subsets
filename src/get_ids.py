@@ -12,16 +12,7 @@ from distributed import world_info_from_env
 import math
 import torch
 import glob
-
-def extract_shard(shard, tempdir):
-    folder = "/".join(shard.split("/")[0:-1])
-    fs, output_path = fsspec.core.url_to_fs(folder)
-
-    shard_id = shard.split("/")[-1]
-    tar_bytes = io.BytesIO(fs.open(f"{output_path}/{shard_id}").read())
-    with tarfile.open(fileobj=tar_bytes) as tar:
-        tar.extractall(tempdir)
-    return shard_id
+from utils import extract_shard
 
 def filter_shard(shard, filter_fn):
     with tempfile.TemporaryDirectory() as tempdir:
